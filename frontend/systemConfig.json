@@ -1,0 +1,31 @@
+
+{
+  "system": {
+    "name": "中影AI",
+    "subName": "China Movie AI Institute",
+    "logoUrl": "assets/logo1-1.png",
+    "backgroundUrl": "assets/bkt.png",
+    "placeholderUrl": "assets/bkt.png",
+    "standbyImageUrl": "assets/t1.jpeg",
+    "cameraOfflineUrl": "assets/t2.png",
+    "footerText": "© 2024 中影人工智能研究院"
+  },
+  "directories": {
+    "portraitWorkDir": "assets/human_pic",
+    "portraitDfmDir": "assets/DFM",
+    "sceneDir": "assets/m_blank"
+  },
+  "Is_from_blank_get_config": false,
+  "blank_url": "http://localhost:8000/",
+  "directories_blank": {
+    "portraitWorkList": "human_pic",
+    "portraitDfmList": "DFM",
+    "sceneList": "m_blank"
+  },
+  "obsConfig": {
+    "enabled": false,
+    "streamUrl": "rtmp://localhost/live",
+    "username": "admin",
+    "secret": "******"
+  }
+}

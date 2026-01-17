@@ -1,0 +1,12 @@
+node_modules
+.DS_Store
+dist
+.env
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.webp
+*.ico
+frontend/public/assets/
+frontend/src/assets/
