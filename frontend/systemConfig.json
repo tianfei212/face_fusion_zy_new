@@ -1,0 +1,33 @@
+
+{
+  "system": {
+    "name": "中影AI",
+    "subName": "一人千面",
+    "logoUrl": "assets/logo1-1.png",
+    "backgroundUrl": "assets/bkt.png",
+    "placeholderUrl": "assets/bkt.png",
+    "standbyImageUrl": "assets/t2.jpeg",
+    "cameraOfflineUrl": "assets/t1.jpeg",
+    "footerText": "© 2024 中影人工智能研究院"
+  },
+  "directories": {
+    "portraitWorkDir": "assets/human_pic",
+    "portraitDfmDir": "assets/DFM",
+    "sceneDir": "assets/m_blank"
+  },
+  "Is_from_blank_get_config": true,
+  "blank_url": "http://localhost:8001/",
+  "stream_send_url": "ws://100.76.199.97:5100",
+  "stream_recv_url": "ws://100.76.199.97:5100",
+  "directories_blank": {
+    "portraitWorkList": "human_pic",
+    "portraitDfmList": "DFM",
+    "sceneList": "m_blank"
+  },
+  "obsConfig": {
+    "enabled": false,
+    "streamUrl": "rtmp://localhost/live",
+    "username": "admin",
+    "secret": "******"
+  }
+}

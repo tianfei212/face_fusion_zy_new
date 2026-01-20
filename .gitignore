@@ -1,0 +1,16 @@
+.vscode/
+.trae/
+
+frontend/node_modules/
+
+**/.env
+**/.env.*
+!**/.env.example
+
+**/__pycache__/
+**/*.py[cod]
+
+**/*.log
+blankend/logs/
+
+*.zip

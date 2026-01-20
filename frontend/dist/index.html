@@ -1,0 +1,94 @@
+
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>中影AI - 实时系统</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --apple-blue: #007AFF;
+        }
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Icons", "Helvetica Neue", Helvetica, Arial, sans-serif;
+            background-size: cover;
+            background-position: center;
+            background-repeat: no-repeat;
+            background-attachment: fixed;
+            color: #FFFFFF;
+            -webkit-font-smoothing: antialiased;
+            overflow: hidden;
+            height: 100vh;
+            width: 100vw;
+            margin: 0;
+            background-color: #0a0a0a; /* 增加深色底，防止背景图加载前发白 */
+        }
+        #root {
+            height: 100%;
+            width: 100%;
+            background: transparent;
+        }
+        .glass-panel {
+            background: rgba(20, 20, 20, 0.4); /* 增加暗度 */
+            backdrop-filter: saturate(180%) blur(40px);
+            -webkit-backdrop-filter: saturate(180%) blur(40px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+        .glass-card {
+            background: rgba(0, 0, 0, 0.2); /* 提高阴影厚度，增强对比 */
+            backdrop-filter: saturate(140%) blur(25px);
+            -webkit-backdrop-filter: saturate(140%) blur(25px);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+        .apple-gradient {
+            background: linear-gradient(150deg, #007AFF 0%, #00C6FF 100%);
+        }
+        input[type='range'] {
+            -webkit-appearance: none;
+            background: transparent;
+        }
+        input[type='range']::-webkit-slider-runnable-track {
+            width: 100%;
+            height: 4px;
+            cursor: pointer;
+            background: rgba(255, 255, 255, 0.15);
+            border-radius: 2px;
+        }
+        input[type='range']::-webkit-slider-thumb {
+            height: 18px;
+            width: 18px;
+            border-radius: 50%;
+            background: #FFFFFF;
+            cursor: pointer;
+            -webkit-appearance: none;
+            margin-top: -7px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+        }
+        .scrollbar-hide::-webkit-scrollbar {
+            display: none;
+        }
+        .scrollbar-hide {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+    </style>
+
+<link rel="stylesheet" href="/index.css">
+<script type="importmap">
+{
+  "imports": {
+    "lucide-react": "https://esm.sh/lucide-react@^0.474.0",
+    "react/": "https://esm.sh/react@^19.2.3/",
+    "react": "https://esm.sh/react@^19.2.3",
+    "react-dom/": "https://esm.sh/react-dom@^19.2.3/"
+  }
+}
+</script>
+  <script type="module" crossorigin src="/assets/index-CEI-E8O-.js"></script>
+</head>
+<body>
+    <div id="root"></div>
+</body>
+</html>

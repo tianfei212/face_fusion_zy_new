@@ -1,0 +1,115 @@
+openapi: 3.0.3
+info:
+  title: ai_face_change Skills API
+  version: 1.0.0
+  description: Standardized Skills registry and invocation APIs.
+servers:
+  - url: /
+paths:
+  /api/v1/skills:
+    get:
+      tags: [skills]
+      summary: List skills
+      operationId: listSkills
+      responses:
+        "200":
+          description: Skill descriptors
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SkillDescriptor"
+  /api/v1/skills/{skill_id}:invoke:
+    post:
+      tags: [skills]
+      summary: Invoke a skill
+      operationId: invokeSkill
+      parameters:
+        - name: skill_id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SkillInvokeRequest"
+      responses:
+        "200":
+          description: Invoke result (ok=true) or structured error (ok=false)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SkillInvokeResponse"
+components:
+  schemas:
+    SkillErrorCode:
+      type: string
+      enum:
+        - INVALID_REQUEST
+        - SKILL_NOT_FOUND
+        - SKILL_ERROR
+        - TIMEOUT
+        - INTERNAL_ERROR
+    SkillError:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          $ref: "#/components/schemas/SkillErrorCode"
+        message:
+          type: string
+        details:
+          nullable: true
+    SkillInvokeRequest:
+      type: object
+      required: [request_id]
+      properties:
+        request_id:
+          type: string
+          description: Client generated correlation id
+        params:
+          type: object
+          additionalProperties: true
+        timeout_ms:
+          type: integer
+          nullable: true
+    SkillInvokeResponse:
+      type: object
+      required: [request_id, ok]
+      properties:
+        request_id:
+          type: string
+        ok:
+          type: boolean
+        result:
+          nullable: true
+        error:
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/SkillError"
+    SkillDescriptor:
+      type: object
+      required: [id, name, version]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        version:
+          type: string
+        description:
+          type: string
+          nullable: true
+        input_schema:
+          type: object
+          nullable: true
+          additionalProperties: true
+        output_schema:
+          type: object
+          nullable: true
+          additionalProperties: true
+
