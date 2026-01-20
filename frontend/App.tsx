@@ -60,6 +60,10 @@ const App: React.FC = () => {
     serverStatusRef.current = state.serverStatus;
   }, [state.serverStatus]);
 
+  if (isViewerMode) {
+    return <Viewer />;
+  }
+
   const log = useCallback((level: LogLevel, message: string) => {
     const time = new Date().toLocaleTimeString('zh-CN', { hour12: false });
     const entry: LogEntry = {
@@ -93,8 +97,8 @@ const App: React.FC = () => {
   const { streamingStatus } = useVideoStreaming(
     cameraStream,
     state.isAutoMatting,
-    ensureVideoInPath(config?.stream_send_url || 'ws://localhost:8100/video_in'),
-    ensureWsPath(config?.stream_recv_url || 'ws://localhost:5100'),
+    ensureVideoInPath(config?.stream_send_url || '/video_in'),
+    ensureWsPath(config?.stream_recv_url || '/video_in'),
     log,
     remoteCanvasRef
   );

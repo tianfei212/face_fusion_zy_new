@@ -30,7 +30,7 @@ export const Viewer: React.FC = () => {
         
         {/* Remote Stream Canvas */}
         <div className="absolute inset-0 z-10">
-          <canvas ref={remoteCanvasRef} className="w-full h-full object-cover" />
+          <canvas ref={remoteCanvasRef} className="w-full h-full object-cover" style={{ transform: 'scaleX(-1)' }} />
         </div>
 
         {/* Status Badge */}

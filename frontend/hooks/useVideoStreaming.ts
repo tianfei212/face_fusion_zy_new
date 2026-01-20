@@ -3,6 +3,10 @@ import type { RefObject } from 'react';
 import { LogLevel } from '../types';
 
 const toWsUrl = (httpUrl: string) => {
+  if (httpUrl.startsWith('/')) {
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    return `${protocol}//${window.location.host}${httpUrl}`;
+  }
   try {
     if (httpUrl.startsWith('ws://') || httpUrl.startsWith('wss://')) {
       return httpUrl;
@@ -14,7 +18,9 @@ const toWsUrl = (httpUrl: string) => {
     }
     return u.toString();
   } catch {
-    return 'ws://localhost:5100/video_in';
+    console.warn('Invalid URL for WebSocket:', httpUrl);
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    return `${protocol}//${window.location.host}/video_in`;
   }
 };
 

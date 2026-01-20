@@ -17,8 +17,8 @@
   },
   "Is_from_blank_get_config": true,
   "blank_url": "http://localhost:8001/",
-  "stream_send_url": "ws://100.76.199.97:5100",
-  "stream_recv_url": "ws://100.76.199.97:5100",
+  "stream_send_url": "/",
+  "stream_recv_url": "/",
   "directories_blank": {
     "portraitWorkList": "human_pic",
     "portraitDfmList": "DFM",

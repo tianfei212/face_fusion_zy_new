@@ -6,19 +6,24 @@ export default defineConfig(({ mode }) => {
     const env = loadEnv(mode, '.', '');
     return {
       server: {
-      port: 5001,
-      host: '0.0.0.0',
-      proxy: {
+        port: 5001,
+        host: '0.0.0.0',
+        proxy: {
+          '/ws': {
+          target: 'ws://localhost:5555',
+          ws: true,
+          changeOrigin: true
+        },
         '/video_in': {
-          target: 'ws://localhost:8100',
+          target: 'ws://localhost:5555',
           ws: true,
           changeOrigin: true
         }
+        },
+        fs: {
+          allow: [path.resolve(__dirname, '..'), path.resolve(__dirname, '../checkpoints')]
+        }
       },
-      fs: {
-        allow: [path.resolve(__dirname, '..'), path.resolve(__dirname, '../checkpoints')]
-      }
-    },
       plugins: [react()],
       define: {
         'process.env.API_KEY': JSON.stringify(env.GEMINI_API_KEY),

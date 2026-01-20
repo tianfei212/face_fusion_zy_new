@@ -1,0 +1,28 @@
+{
+  "stream": {
+    "relay_enabled": true,
+    "zmq_endpoint": "tcp://100.76.199.97:8100",
+    "send_queue_size": 4,
+    "jpeg_quality": 85,
+    "control_client_id": "__blankend_control__",
+    "default_client_id": "",
+    "link_request_enabled": true,
+    "link_request_timeout_ms": 1000,
+    "link_request_retry_interval_ms": 1000,
+    "link_request_max_retries": 5,
+    "heartbeat_enabled": true,
+    "heartbeat_interval_ms": 1000,
+    "forward_recv_enabled": false,
+    "forward_recv_client_id": "WEB_FRONTEND",
+    "forward_recv_only": false,
+    "echo_back":true,
+    "reencode_enabled": false
+  },
+  "cache": {
+    "static_max_age": 31536000
+  },
+  "server": {
+    "control_port": 8001,
+    "stream_port": 8100
+  }
+}

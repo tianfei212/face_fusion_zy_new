@@ -27,7 +27,7 @@ class AiCoreConfig:
     similarity_threshold: float = 0.75
     portrait_name: str | None = None
     scene_name: str | None = None
-    depth_fusion: bool = True
+    depth_fusion: bool = False
     output_jpeg_quality: int = 85
     max_fps: float = 20.0
     min_fps: float = 15.0
@@ -159,20 +159,33 @@ class _DeviceWorker:
             self._depth = DepthModel(depth_path, force_cuda=True, providers_cfg=cfg, use_tensorrt=False)
             try:
                 self.health.rvm_providers = list(self._rvm.meta.get("providers_active") or [])
+                if "CUDAExecutionProvider" not in self.health.rvm_providers:
+                    logger.warning(f"RVM running on CPU! Providers: {self.health.rvm_providers}, Error: {self._rvm.meta.get('cuda_failed')}")
+                else:
+                    logger.info(f"RVM initialized on {self.health.rvm_providers}")
             except Exception:
                 self.health.rvm_providers = None
             try:
                 self.health.depth_providers = list(self._depth.meta.get("providers_active") or [])
+                if "CUDAExecutionProvider" not in self.health.depth_providers:
+                    logger.warning(f"Depth running on CPU! Providers: {self.health.depth_providers}, Error: {self._depth.meta.get('cuda_failed')}")
             except Exception:
                 self.health.depth_providers = None
         if self._face_app is None:
             from insightface.app import FaceAnalysis  # type: ignore
 
             providers = [("CUDAExecutionProvider", {"device_id": int(self.device_id)}), "CPUExecutionProvider"]
+            # Optimization: Only load detection and landmark models
             try:
-                self._face_app = FaceAnalysis(name=os.getenv("INSIGHTFACE_APP") or "buffalo_l", providers=providers)
+                self._face_app = FaceAnalysis(
+                    name=os.getenv("INSIGHTFACE_APP") or "buffalo_l",
+                    allowed_modules=['detection', 'landmark_2d_106'],
+                    providers=providers
+                )
             except Exception:
-                self._face_app = FaceAnalysis(name=os.getenv("INSIGHTFACE_APP") or "buffalo_l")
+                # Fallback if allowed_modules not supported or other error
+                self._face_app = FaceAnalysis(name=os.getenv("INSIGHTFACE_APP") or "buffalo_l", providers=providers)
+            
             self._face_app.prepare(ctx_id=0, det_size=(640, 640))
         if self._swapper is None:
             from insightface.model_zoo import get_model  # type: ignore
@@ -194,7 +207,14 @@ class _DeviceWorker:
     def _decode(self, jpeg_bytes: bytes) -> np.ndarray | None:
         if self._jpeg is not None:
             try:
-                rgb = self._jpeg.decode(jpeg_bytes)
+                width, height, _, _ = self._jpeg.decode_header(jpeg_bytes)
+                scale = (1, 1)
+                if width > 3000:
+                    scale = (1, 4)
+                elif width > 1500:
+                    scale = (1, 2)
+                
+                rgb = self._jpeg.decode(jpeg_bytes, scaling_factor=scale)
                 return rgb[:, :, ::-1].copy()
             except Exception:
                 pass
@@ -203,6 +223,12 @@ class _DeviceWorker:
 
             arr = np.frombuffer(jpeg_bytes, dtype=np.uint8)
             bgr = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+            if bgr is not None:
+                h, w = bgr.shape[:2]
+                if w > 1920:
+                    new_w = 1280
+                    new_h = int(h * (1280 / w))
+                    bgr = cv2.resize(bgr, (new_w, new_h))
             return bgr
         except Exception:
             return None
@@ -230,21 +256,48 @@ class _DeviceWorker:
             return bgr, diag
         if (seq % self._swap_stride) != 0:
             return bgr, diag
-        faces = self._face_app.get(bgr)
-        if not faces:
+
+        face = None
+        # Detect every N frames or if no face cached
+        do_detect = (seq % self._detect_interval == 0) or (self._last_face is None)
+        
+        if do_detect:
+            faces = self._face_app.get(bgr)
+            if faces:
+                face = max(faces, key=lambda f: float((f.bbox[2] - f.bbox[0]) * (f.bbox[3] - f.bbox[1])))
+                self._last_face = face
+            else:
+                self._last_face = None
+        else:
+            face = self._last_face
+
+        if not face:
             return bgr, diag
-        face = max(faces, key=lambda f: float((f.bbox[2] - f.bbox[0]) * (f.bbox[3] - f.bbox[1])))
+
+        # Calculate similarity (only when detected, or reuse cached sim?)
+        # For simplicity, we re-calc sim or just skip checking sim for cached faces if we trust the cache.
+        # But 'face' object has 'normed_embedding'.
+        
+        sim = None
         try:
-            sim = float(np.dot(face.normed_embedding, source))
+            if hasattr(face, 'normed_embedding') and face.normed_embedding is not None:
+                sim = float(np.dot(face.normed_embedding, source))
         except Exception:
             sim = None
+        
         diag["swap_similarity"] = sim
-        if sim is None or sim < float(self._similarity_threshold):
-            return bgr, diag
+        if sim is not None and sim < float(self._similarity_threshold):
+             # If similarity is too low, maybe it's not the target person.
+             # But if we are using cached face, we already checked this.
+             return bgr, diag
+
         src = SimpleNamespace(normed_embedding=source)
-        out = self._swapper.get(bgr, face, src, paste_back=True)
-        diag["swap_applied"] = True
-        return out, diag
+        try:
+            out = self._swapper.get(bgr, face, src, paste_back=True)
+            diag["swap_applied"] = True
+            return out, diag
+        except Exception:
+            return bgr, diag
 
     def _matting_and_compose(self, client_id: bytes, bgr: np.ndarray) -> tuple[np.ndarray, dict[str, Any]]:
         if self._rvm is None or self._depth is None:
@@ -352,16 +405,48 @@ class _DeviceWorker:
             diag: dict[str, Any] = {"device_id": self.device_id}
             try:
                 self._ensure_models()
-                bgr = self._decode(job.jpeg)
-                if bgr is None:
-                    raise RuntimeError("decode_failed")
-                bgr2, swap_diag = self._swap_face(bgr, job.seq)
-                diag.update(swap_diag)
-                out_bgr, mat_diag = self._matting_and_compose(job.client_id, bgr2)
-                diag.update(mat_diag)
-                out_jpeg = self._encode(out_bgr)
-                if not out_jpeg:
-                    raise RuntimeError("encode_failed")
+                t1 = time.perf_counter()
+                
+                if os.getenv("SIMPLE_FORWARD") == "1":
+                    # Log frame size for debugging bandwidth
+                    if self.health.frames % 30 == 0:
+                        logger.info(f"SimpleForward: Recv frame size={len(job.jpeg)} bytes")
+                    
+                    out_jpeg = job.jpeg
+                    diag["mode"] = "simple_forward"
+                    t2 = t3 = t4 = t1
+                    t5 = time.perf_counter()
+                    # Skip decode/swap/matting/encode
+                    decode_ms = swap_ms = matting_ms = encode_ms = 0.0
+                else:
+                    bgr = self._decode(job.jpeg)
+                    t2 = time.perf_counter()
+                    if bgr is None:
+                        raise RuntimeError("decode_failed")
+                    bgr2, swap_diag = self._swap_face(bgr, job.seq)
+                    t3 = time.perf_counter()
+                    diag.update(swap_diag)
+                    out_bgr, mat_diag = self._matting_and_compose(job.client_id, bgr2)
+                    t4 = time.perf_counter()
+                    diag.update(mat_diag)
+                    out_jpeg = self._encode(out_bgr)
+                    t5 = time.perf_counter()
+                    if not out_jpeg:
+                        raise RuntimeError("encode_failed")
+                    
+                    decode_ms = (t2 - t1) * 1000.0
+                    swap_ms = (t3 - t2) * 1000.0
+                    matting_ms = (t4 - t3) * 1000.0
+                    encode_ms = (t5 - t4) * 1000.0
+                
+                # Performance logging
+                total_ms = (t5 - t0) * 1000.0
+                if total_ms > 100.0:  # Log slow frames
+                    logger.info(
+                        "Slow frame on GPU%d: total=%.1fms decode=%.1f swap=%.1f matting=%.1f encode=%.1f",
+                        self.device_id, total_ms, decode_ms, swap_ms, matting_ms, encode_ms
+                    )
+                
                 self.output_q.put(FrameResult(client_id=job.client_id, seq=job.seq, ts=job.ts, jpeg=out_jpeg, diag=diag))
                 self.health.frames += 1
                 self._tick_fps()

@@ -6,6 +6,11 @@ const toWsUrl = (httpUrl: string) => {
     if (httpUrl.startsWith('ws://') || httpUrl.startsWith('wss://')) {
       return httpUrl;
     }
+    // Handle relative paths
+    if (httpUrl.startsWith('/')) {
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      return `${protocol}//${window.location.host}${httpUrl}`;
+    }
     const u = new URL(httpUrl);
     u.protocol = u.protocol === 'https:' ? 'wss:' : 'ws:';
     if ((u.pathname === '/' || u.pathname.length === 0) && (u.hostname === 'localhost' || u.hostname === '127.0.0.1')) {

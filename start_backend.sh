@@ -43,8 +43,14 @@ release_port 8001
 release_port 8100
 
 cd "$ROOT_DIR"
+export PYTHONPATH="$ROOT_DIR:${PYTHONPATH:-}"
+export SIMPLE_FORWARD=1
+
 mkdir -p "$ROOT_DIR/blankend/logs"
-nohup env BLANKEND_RELAY_ENABLED=0 uvicorn blankend.main:app --host 0.0.0.0 --port 8001 > "$ROOT_DIR/blankend/logs/backend_8001.log" 2>&1 &
+# Start API server (Relay disabled)
+nohup env BLANKEND_RELAY_ENABLED=0 python3 -m uvicorn blankend.main:app --host 0.0.0.0 --port 8001 > "$ROOT_DIR/blankend/logs/backend_8001.log" 2>&1 &
 echo "后端8001已在后台启动 PID=$!"
-nohup env BLANKEND_RELAY_ENABLED=1 uvicorn blankend.main:app --host 0.0.0.0 --port 8100 > "$ROOT_DIR/blankend/logs/backend_8100.log" 2>&1 &
+
+# Start Worker server (Relay enabled)
+nohup env BLANKEND_RELAY_ENABLED=1 python3 -m uvicorn blankend.main:app --host 0.0.0.0 --port 8100 > "$ROOT_DIR/blankend/logs/backend_8100.log" 2>&1 &
 echo "后端8100已在后台启动 PID=$!"

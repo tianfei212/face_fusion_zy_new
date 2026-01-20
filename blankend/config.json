@@ -1,8 +1,8 @@
 {
   "stream": {
     "relay_enabled": true,
-    "zmq_endpoint": "tcp://100.76.199.97:8100",
-    "send_queue_size": 4,
+    "zmq_endpoint": "tcp://localhost:8888",
+    "send_queue_size": 100,
     "jpeg_quality": 85,
     "control_client_id": "__blankend_control__",
     "default_client_id": "",
@@ -15,7 +15,7 @@
     "forward_recv_enabled": false,
     "forward_recv_client_id": "WEB_FRONTEND",
     "forward_recv_only": false,
-    "echo_back":true,
+    "echo_back":false,
     "reencode_enabled": false
   },
   "cache": {

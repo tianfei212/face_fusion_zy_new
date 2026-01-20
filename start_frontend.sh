@@ -44,6 +44,14 @@ if [ ! -f "$ROOT_DIR/frontend/package.json" ]; then
   exit 1
 fi
 
+# Ensure dependencies are installed
+if [ ! -d "$ROOT_DIR/frontend/node_modules" ]; then
+    echo "Installing frontend dependencies..."
+    cd "$ROOT_DIR/frontend"
+    npm install
+    cd "$ROOT_DIR"
+fi
+
 for port in $FRONTEND_PORTS; do
   nohup npm --prefix "$ROOT_DIR/frontend" run dev -- --host 0.0.0.0 --port "$port" > "/tmp/ai_face_change_frontend_${port}.log" 2>&1 &
   echo "前端已在后台启动 port=$port PID=$!"

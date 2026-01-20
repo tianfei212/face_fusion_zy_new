@@ -1,0 +1,7 @@
+{
+  "name": "中影AI 实时面容系统",
+  "description": "中国电影人工智能研究院（CMAI）实时人像面容与模型替换系统，采用简约、国际色卡及苹果级UI设计风格。",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
