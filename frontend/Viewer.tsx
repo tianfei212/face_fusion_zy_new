@@ -10,10 +10,18 @@ export const Viewer: React.FC = () => {
   useEffect(() => {
     const init = async () => {
       try {
-        const res = await fetch('./systemConfig.json');
+        const res = await fetch(`./systemConfig.json?t=${Date.now()}`);
         const cfg = await res.json();
-        setConfigUrl(cfg.stream_recv_url || cfg.stream_url || cfg.blank_url || '');
-      } catch {}
+        // Ensure we prioritize stream_viewer_url and fallback correctly
+        let url = cfg.stream_viewer_url;
+        if (!url) url = cfg.stream_recv_url;
+        if (!url) url = cfg.stream_url;
+        if (!url) url = cfg.blank_url;
+        
+        setConfigUrl(url || '');
+      } catch (e) {
+        console.error("Failed to load config:", e);
+      }
     };
     init();
   }, []);
