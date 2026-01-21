@@ -39,6 +39,9 @@ for port in $FRONTEND_PORTS; do
   release_port "$port"
 done
 
+echo "清理所有 npm 进程..."
+pkill npm || true
+
 if [ ! -f "$ROOT_DIR/frontend/package.json" ]; then
   echo "未找到 $ROOT_DIR/frontend/package.json，无法启动前端"
   exit 1

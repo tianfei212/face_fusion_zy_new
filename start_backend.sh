@@ -42,6 +42,9 @@ release_port() {
 release_port 8001
 release_port 8100
 
+echo "清理所有 uvicorn 进程..."
+pkill uvicorn || true
+
 cd "$ROOT_DIR"
 export PYTHONPATH="$ROOT_DIR:${PYTHONPATH:-}"
 export SIMPLE_FORWARD=1
