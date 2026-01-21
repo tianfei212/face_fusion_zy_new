@@ -9,7 +9,8 @@ const toWsUrl = (httpUrl: string) => {
     // Handle relative paths
     if (httpUrl.startsWith('/')) {
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      return `${protocol}//${window.location.host}${httpUrl}`;
+      const path = httpUrl === '/' ? '/video_in' : httpUrl;
+      return `${protocol}//${window.location.host}${path}`;
     }
     const u = new URL(httpUrl);
     u.protocol = u.protocol === 'https:' ? 'wss:' : 'ws:';
