@@ -29,12 +29,26 @@ export const useStreamReceiver = (
 ) => {
   const [status, setStatus] = useState('未连接');
   const wsRef = useRef<WebSocket | null>(null);
+  const bcRef = useRef<BroadcastChannel | null>(null);
+  const lastBroadcastTimeRef = useRef(0); // For throttling
 
   useEffect(() => {
+    // 1. Setup Broadcast Channel
+    if ('BroadcastChannel' in window) {
+      try {
+        bcRef.current = new BroadcastChannel('stream_sync_channel');
+      } catch {
+        bcRef.current = null;
+      }
+    }
+
+    // 2. Setup WebSocket
     if (!backendBaseUrl) {
       setStatus('未连接');
-      return;
+      // Even without WS, we keep BC open to clean up properly
+      return () => { try { bcRef.current?.close(); } catch {} };
     }
+
     const wsUrl = toWsUrl(backendBaseUrl);
     const ws = new WebSocket(wsUrl);
     ws.binaryType = 'arraybuffer';
@@ -44,20 +58,44 @@ export const useStreamReceiver = (
     ws.onopen = () => setStatus('已连接');
     ws.onclose = () => setStatus('未连接');
     ws.onerror = () => setStatus('错误');
+    
     ws.onmessage = async (ev) => {
       const buf = ev.data as ArrayBuffer;
-      if (!canvasRef.current || !buf) return;
+      if (!buf) return;
+
+      // A. Broadcast (Throttled to ~30 FPS to save CPU)
+      const now = Date.now();
+      if (now - lastBroadcastTimeRef.current > 33) {
+        if (bcRef.current) {
+          // Send raw buffer, let Viewer wrap it in Blob if needed
+          // Wrapping { type: 'frame', payload: buf } to match Viewer expectation
+          bcRef.current.postMessage({ type: 'frame', payload: buf });
+          lastBroadcastTimeRef.current = now;
+        }
+      }
+
+      // B. Local Draw
+      if (!canvasRef.current) return;
+      
+      // Use Blob only for createImageBitmap
       const blob = new Blob([buf], { type: 'image/jpeg' });
       try {
         const bmp = await createImageBitmap(blob);
         const c = canvasRef.current;
-        c.width = bmp.width; c.height = bmp.height;
-        const ctx = c.getContext('2d');
+        if (c.width !== bmp.width) c.width = bmp.width;
+        if (c.height !== bmp.height) c.height = bmp.height;
+        
+        const ctx = c.getContext('2d', { alpha: false }); // Opt: alpha false
         if (ctx) ctx.drawImage(bmp, 0, 0);
+        bmp.close(); // Opt: Close bitmap
       } catch {}
     };
 
-    return () => { try { ws.close(); } catch {} };
+    return () => {
+      try { ws.close(); } catch {}
+      try { bcRef.current?.close(); } catch {}
+      bcRef.current = null;
+    };
   }, [backendBaseUrl, canvasRef]);
 
   return { status };

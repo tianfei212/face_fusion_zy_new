@@ -47,6 +47,9 @@ const App: React.FC = () => {
   // 前端不再负责抠像，改为推流
   const serverStatusRef = useRef(state.serverStatus);
   const isCameraOnRef = useRef(state.isCameraOn);
+  const lastFaceNameRef = useRef<string | null>(null);
+  const lastSceneNameRef = useRef<string | null>(null);
+  const lastDfmNameRef = useRef<string | null>(null);
 
   useEffect(() => {
     cameraStreamRef.current = cameraStream;
@@ -96,9 +99,9 @@ const App: React.FC = () => {
 
   const { streamingStatus } = useVideoStreaming(
     cameraStream,
-    state.isAutoMatting,
+    !isViewerMode && state.isCameraOn,
     ensureVideoInPath(config?.stream_send_url || '/video_in'),
-    ensureWsPath(config?.stream_recv_url || '/video_in'),
+    ensureVideoInPath(config?.stream_recv_url || '/video_in'),
     log,
     remoteCanvasRef
   );
@@ -132,6 +135,7 @@ const App: React.FC = () => {
       
       const syncData = {
         isProcessing: state.isProcessing,
+        showBackendStream: state.isAutoMatting,
         portraitUrl: selectedItem?.url || '',
         backgroundUrl: resolveAssetUrl(selectedScene?.url || ''),
         logoUrl: resolveAssetUrl(config.system.logoUrl || ''),
@@ -178,7 +182,7 @@ const App: React.FC = () => {
 
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
       setCameraStream(stream);
-      setState(prev => ({ ...prev, isCameraOn: true }));
+      setState(prev => ({ ...prev, isCameraOn: true, isAutoMatting: true }));
       log('info', '摄像头已启动');
 
       if (deviceId) {
@@ -213,11 +217,14 @@ const App: React.FC = () => {
     if (isCameraTogglingRef.current) return;
 
     if (state.isCameraOn) {
+      if (state.isProcessing) {
+        void sendAiProcess({ enable: false, mode: state.mode });
+      }
       if (cameraStream) {
         cameraStream.getTracks().forEach(track => track.stop());
       }
       setCameraStream(null);
-      setState(prev => ({ ...prev, isCameraOn: false }));
+      setState(prev => ({ ...prev, isCameraOn: false, isAutoMatting: false, isProcessing: false }));
       log('info', '摄像头已关闭');
     } else {
       setupCamera(selectedDeviceId || undefined);
@@ -228,7 +235,7 @@ const App: React.FC = () => {
   const handleToggleMatting = () => {
     setState(prev => {
       const next = !prev.isAutoMatting;
-      log('info', next ? '推流已开启' : '推流已关闭');
+      log('info', next ? '后端画面显示已开启' : '后端画面显示已关闭');
       return { ...prev, isAutoMatting: next };
     });
   };
@@ -396,6 +403,194 @@ const App: React.FC = () => {
     });
   };
 
+  const buildApiUrl = useCallback((path: string) => {
+    const base = (config?.blank_url || '').replace(/\/$/, '');
+    const cleanPath = path.startsWith('/') ? path : `/${path}`;
+    return `${base}${cleanPath}`;
+  }, [config?.blank_url]);
+
+  const sendAiProcess = useCallback(async (payload: any) => {
+    if (!config?.blank_url) return null;
+    try {
+      const res = await fetch(buildApiUrl('/api/v1/ai/process'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return await res.json();
+    } catch (e: any) {
+      log('error', `AI process 请求失败: ${e?.message || e}`);
+      return null;
+    }
+  }, [buildApiUrl, config?.blank_url, log]);
+
+  const sendAiCommand = useCallback(async (payload: any) => {
+    if (!config?.blank_url) return null;
+    try {
+      const res = await fetch(buildApiUrl('/api/v1/ai/command'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return await res.json();
+    } catch (e: any) {
+      log('error', `AI command 请求失败: ${e?.message || e}`);
+      return null;
+    }
+  }, [buildApiUrl, config?.blank_url, log]);
+
+  const waitForDfmReady = useCallback(async (expectedName: string, standbyWorkerId: number, timeoutMs: number = 60000) => {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      try {
+        const res = await fetch(buildApiUrl('/api/v1/ai/status'));
+        if (res.ok) {
+          const data = await res.json();
+          const workers = data?.status?.workers;
+          const st = workers?.[standbyWorkerId];
+          const loaded = st?.loaded_dfm;
+          if (loaded && String(loaded) === String(expectedName)) {
+            return true;
+          }
+        }
+      } catch (e) {}
+      await new Promise(r => setTimeout(r, 200));
+    }
+    return false;
+  }, [buildApiUrl]);
+
+  useEffect(() => {
+    if (isViewerMode) return;
+    if (!state.isProcessing) {
+      lastFaceNameRef.current = null;
+      lastSceneNameRef.current = null;
+      lastDfmNameRef.current = null;
+      return;
+    }
+
+    const activeList = state.mode === OperationMode.FACE_SWAP ? state.portraits : state.models;
+    const selectedItem = activeList.find(p => p.id === state.selectedPortraitId) || null;
+    const selectedScene = state.scenes.find(bg => bg.id === state.selectedBackgroundId) || null;
+    const faceName = selectedItem?.name ? String(selectedItem.name) : null;
+    const sceneName = selectedScene?.name ? String(selectedScene.name) : null;
+
+    if (sceneName && sceneName !== lastSceneNameRef.current) {
+      lastSceneNameRef.current = sceneName;
+      void sendAiCommand({ type: 'SET_BG', payload: sceneName });
+    }
+
+    if (!faceName) return;
+
+    if (state.mode === OperationMode.FACE_SWAP) {
+      if (faceName !== lastFaceNameRef.current) {
+        lastFaceNameRef.current = faceName;
+        void sendAiCommand({ type: 'SET_FACE', payload: faceName });
+      }
+      return;
+    }
+
+    if (faceName === lastDfmNameRef.current) return;
+    lastDfmNameRef.current = faceName;
+    void (async () => {
+      const loadRes = await sendAiCommand({ type: 'LOAD_DFM', payload: faceName });
+      const standbyId = loadRes?.standby_worker_id;
+      if (typeof standbyId === 'number') {
+        const ready = await waitForDfmReady(faceName, standbyId, 90000);
+        if (ready) {
+          await sendAiCommand({ type: 'ACTIVATE', worker_id: standbyId });
+        }
+      }
+    })();
+  }, [
+    isViewerMode,
+    sendAiCommand,
+    state.isProcessing,
+    state.mode,
+    state.models,
+    state.portraits,
+    state.scenes,
+    state.selectedBackgroundId,
+    state.selectedPortraitId,
+    waitForDfmReady
+  ]);
+
+  const handleToggleProcessing = useCallback(async () => {
+    if (!config?.blank_url) {
+      log('warn', '未加载后端地址配置，无法发送指令');
+      return;
+    }
+
+    const next = !state.isProcessing;
+    if (!next) {
+      await sendAiProcess({ enable: false, mode: state.mode });
+      setState(prev => ({ ...prev, isProcessing: false }));
+      log('info', '已发送停止合成指令');
+      return;
+    }
+
+    const activeList = state.mode === OperationMode.FACE_SWAP ? state.portraits : state.models;
+    const selectedItem = activeList.find(p => p.id === state.selectedPortraitId) || null;
+    const selectedScene = state.scenes.find(bg => bg.id === state.selectedBackgroundId) || null;
+
+    if (!selectedItem) {
+      log('warn', state.mode === OperationMode.FACE_SWAP ? '未选择目标人像' : '未选择 DFM 模型');
+      return;
+    }
+    if (!selectedScene) {
+      log('warn', '未选择场景图片');
+      return;
+    }
+
+    const modeParam = state.mode === OperationMode.FACE_SWAP ? 'FACE' : 'DFM';
+    const param1 = modeParam;
+    const param2 = String(selectedItem.name || '');
+    const param3 = String(selectedScene.name || '');
+
+    log('info', `发送切换指令: [${param1}, ${param2}, ${param3}]`);
+
+    if (state.mode === OperationMode.FACE_SWAP) {
+      await sendAiCommand({ type: 'UNLOAD_MODEL' });
+      await sendAiProcess({
+        enable: true,
+        mode: modeParam,
+        portrait_id: param2,
+        scene_id: param3,
+        similarity: state.similarity,
+        sharpness: state.sharpness
+      });
+      setState(prev => ({ ...prev, isProcessing: true }));
+      return;
+    }
+
+    await sendAiProcess({
+      enable: true,
+      mode: modeParam,
+      portrait_id: null,
+      scene_id: param3,
+      similarity: state.similarity,
+      sharpness: state.sharpness
+    });
+
+    const loadRes = await sendAiCommand({ type: 'LOAD_DFM', payload: param2 });
+    const standbyId = loadRes?.standby_worker_id;
+    if (typeof standbyId === 'number') {
+      const ready = await waitForDfmReady(param2, standbyId, 90000);
+      if (ready) {
+        await sendAiCommand({ type: 'ACTIVATE', worker_id: standbyId });
+        setState(prev => ({ ...prev, isProcessing: true }));
+        return;
+      }
+      log('warn', 'DFM 预加载超时，未执行主备切换');
+      setState(prev => ({ ...prev, isProcessing: true }));
+      return;
+    }
+
+    log('warn', '未获得 standby worker id，跳过主备切换');
+    setState(prev => ({ ...prev, isProcessing: true }));
+  }, [config?.blank_url, log, sendAiCommand, sendAiProcess, state.isProcessing, state.mode, state.models, state.portraits, state.scenes, state.selectedBackgroundId, state.selectedPortraitId, state.sharpness, state.similarity, waitForDfmReady]);
+
   if (isViewerMode) return <Viewer />;
 
   if (!config) return <div className="h-screen w-full flex items-center justify-center text-white/50 font-black uppercase tracking-[0.5em] bg-[#050505]">Initializing CMAI Engine...</div>;
@@ -426,7 +621,7 @@ const App: React.FC = () => {
           resolveAssetUrl={resolveAssetUrl}
           onModeChange={handleModeChange}
           onSliderChange={(k, v) => setState(prev => ({ ...prev, [k]: v }))}
-          onToggleProcessing={() => setState(prev => ({ ...prev, isProcessing: !prev.isProcessing }))}
+          onToggleProcessing={() => { void handleToggleProcessing(); }}
           onSwitch={() => {
              const activeList = state.mode === OperationMode.FACE_SWAP ? state.portraits : state.models;
              const idx = activeList.findIndex(p => p.id === state.selectedPortraitId);
@@ -479,7 +674,7 @@ const App: React.FC = () => {
         videoDevices={videoDevices}
         selectedDeviceId={selectedDeviceId}
         onDeviceChange={handleDeviceChange}
-        isStreaming={state.isAutoMatting}
+        isStreaming={state.isCameraOn}
         streamingStatus={streamingStatus}
         logs={logs}
       />

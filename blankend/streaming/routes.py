@@ -12,7 +12,7 @@ from .hub import StreamHub
 from ..video_processing.service import get_video_processing_service
 from ..video_processing.hwdecode import FfmpegHwDecoder, HwDecodeConfig, run_decode_session
 from ..realtime_pipeline.service import get_realtime_pipeline_service
-from ..ai_core.service import get_ai_core_service
+from ..ai_core.manager import get_ai_manager
 
 try:
     import zmq
@@ -241,8 +241,12 @@ class ZmqRelay:
                     logger.info("zmq relay channel linked endpoint=%s", self.endpoint)
                 continue
             try:
-                if self.frame_handler is not None and self.frame_handler(client_id, data):
-                    continue
+                if self.frame_handler is not None:
+                    # Log relay handler call for debug
+                    # if self._recv_frames % 60 == 0:
+                    #     logger.info("relay_frame_handler_call client_id=%s size=%s", client_id.hex()[:8], len(data))
+                    if self.frame_handler(client_id, data):
+                        continue
             except Exception:
                 pass
             self._recv_frames += 1
@@ -309,7 +313,7 @@ def get_router() -> APIRouter:
     hub = StreamHub()
     vp_service = get_video_processing_service()
     rt_service = get_realtime_pipeline_service()
-    ai_service = get_ai_core_service()
+    ai_manager = get_ai_manager()
     config = _load_config()
     stream_config = config.get("stream", {}) if isinstance(config, dict) else {}
     relay_enabled = bool(stream_config.get("relay_enabled", True))
@@ -331,6 +335,9 @@ def get_router() -> APIRouter:
         jpeg_quality = 85
     reencode_enabled = bool(stream_config.get("reencode_enabled", False))
     zmq_identity = os.getenv("BLANKEND_ZMQ_IDENTITY") or stream_config.get("zmq_identity") or "AI_WORKER"
+    # Important: Do not use AI_WORKER as default client_id for video source, otherwise it loops back
+    default_client_id = str(stream_config.get("default_client_id") or "WEB_FRONTEND")
+    
     echo_back = bool(stream_config.get("echo_back", True))
     control_client_id = str(stream_config.get("control_client_id") or "__blankend_control__")
     link_request_enabled = bool(stream_config.get("link_request_enabled", True))
@@ -346,7 +353,6 @@ def get_router() -> APIRouter:
         link_request_max_retries = int(stream_config.get("link_request_max_retries", 5))
     except Exception:
         link_request_max_retries = 5
-    default_client_id = str(stream_config.get("default_client_id") or zmq_identity)
     heartbeat_enabled = bool(stream_config.get("heartbeat_enabled", True))
     try:
         heartbeat_interval_ms = int(stream_config.get("heartbeat_interval_ms", 1000))
@@ -403,7 +409,7 @@ def get_router() -> APIRouter:
             default_client_id,
             frame_handler=(
                 lambda cid, data: (
-                    ai_service.submit(cid, data) if ai_service.enabled() else rt_service.submit(cid, data)
+                    ai_manager.submit_frame(cid, data) if ai_manager.enabled() else rt_service.submit(cid, data)
                 )
             ),
         )
@@ -421,7 +427,7 @@ def get_router() -> APIRouter:
             sender=(lambda cid, data: relay.enqueue(cid, data)) if relay is not None else (lambda _cid, _data: None),
             broadcaster=(lambda data: asyncio.run_coroutine_threadsafe(hub.broadcast_bytes(data), loop)),
         )
-        ai_service.attach(
+        ai_manager.attach(
             sender=(lambda cid, data: relay.enqueue(cid, data)) if relay is not None else (lambda _cid, _data: None),
             broadcaster=(lambda data: asyncio.run_coroutine_threadsafe(hub.broadcast_bytes(data), loop)),
         )
@@ -443,10 +449,20 @@ def get_router() -> APIRouter:
         last_log = time.monotonic()
         try:
             while True:
-                msg = await ws.receive()
+                try:
+                    msg = await ws.receive()
+                except RuntimeError:
+                    # 'Cannot call "receive" once a disconnect message has been received'
+                    break
+                
                 data = msg.get("bytes")
                 text = msg.get("text")
                 if data is not None:
+                    # Direct submission to AI Manager (Bypass ZMQ loopback requirement)
+                    if ai_manager.enabled():
+                        if ai_manager.submit_frame(default_client_id.encode(), data):
+                            continue
+
                     if vp_service.enabled():
                         recv_frames += 1
                         recv_bytes += len(data)
@@ -468,6 +484,7 @@ def get_router() -> APIRouter:
                             data = jpeg.encode(decoded, quality=jpeg_quality)
                         except Exception:
                             pass
+
                     recv_frames += 1
                     recv_bytes += len(data)
                     now = time.monotonic()
@@ -514,6 +531,9 @@ def get_router() -> APIRouter:
         loop = asyncio.get_running_loop()
 
         def _broadcast_to_loop(frame: bytes) -> None:
+            if ai_manager.enabled():
+                if ai_manager.submit_frame(default_client_id.encode(), frame):
+                    return
             if relay is not None:
                 relay.enqueue(default_client_id, frame)
             try:

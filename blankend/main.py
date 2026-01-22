@@ -33,6 +33,29 @@ async def start_stream_relay() -> None:
     except Exception:
         pass
     try:
+        from .ai_core.model_config import load_ai_model_config, log_ai_model_config
+
+        cfg = load_ai_model_config()
+        log_ai_model_config(cfg, prefix="startup_ai_models")
+    except Exception:
+        pass
+    try:
+        from .ai_core.manager import get_ai_manager
+
+        mgr = get_ai_manager()
+        t0 = asyncio.get_running_loop().time()
+        logger.info("startup_ai_preload_start")
+        mgr.start()
+        st = mgr.wait_for_workers(timeout_s=180.0)
+        cost_ms = int((asyncio.get_running_loop().time() - t0) * 1000)
+        logger.info(
+            "startup_ai_preload_done cost_ms=%s processes=%s",
+            cost_ms,
+            st.get("processes"),
+        )
+    except Exception as e:
+        logger.exception("startup_ai_preload_failed err=%s", e)
+    try:
         from .video_processing.codec import probe_hw_codecs
 
         st = probe_hw_codecs()

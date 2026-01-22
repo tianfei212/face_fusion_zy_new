@@ -12,9 +12,9 @@
     "link_request_max_retries": 5,
     "heartbeat_enabled": true,
     "heartbeat_interval_ms": 1000,
-    "forward_recv_enabled": false,
+    "forward_recv_enabled": true,
     "forward_recv_client_id": "WEB_FRONTEND",
-    "forward_recv_only": false,
+    "forward_recv_only": true,
     "echo_back":false,
     "reencode_enabled": false
   },
@@ -24,5 +24,17 @@
   "server": {
     "control_port": 8001,
     "stream_port": 8100
+  },
+  "ai": {
+    "models": {
+      "rvm": "rvm_mobilenetv3_fp32.onnx",
+      "depth": "depth_anything_v2_vits_fp32.onnx",
+      "swap": "inswapper_128_fp16.onnx",
+      "insightface_app": "buffalo_l"
+    },
+    "preload": {
+      "dfm": false,
+      "dfm_model": ""
+    }
   }
 }

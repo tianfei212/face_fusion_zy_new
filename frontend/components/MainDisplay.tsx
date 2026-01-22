@@ -184,56 +184,50 @@ export const MainDisplay: React.FC<MainDisplayProps> = ({
 
         {/* 核心内容区 */}
         <div className="absolute inset-0 z-10 flex items-center justify-center">
-          {state.isProcessing ? (
-             <div className="relative w-full h-full flex items-center justify-center overflow-hidden">
-                <img 
-                  src={resolveAssetUrl(selectedPortrait?.url || '')} 
-                  className="w-full h-full object-cover transition-all duration-700 brightness-110 scale-100" 
-                  alt="AI Synthesis Result" 
-                />
+          <div className="w-full h-full relative overflow-hidden flex items-center justify-center bg-transparent">
+            {showCameraLayer ? (
+              state.isAutoMatting ? (
+                <canvas className="absolute inset-0 w-full h-full object-cover" ref={remoteCanvasRef} />
+              ) : (
+                <video 
+                  ref={videoRef}
+                  autoPlay
+                  playsInline
+                  muted
+                  className="absolute inset-0 w-full h-full object-cover" />
+              )
+            ) : config.system.standbyImageUrl ? (
+              <img 
+               key={config.system.standbyImageUrl}
+               src={resolveAssetUrl(config.system.standbyImageUrl)} 
+               alt="Standby Screen" 
+               className="w-full h-full object-cover opacity-80"
+               onError={(e) => {
+                 console.error('Standby image load failed:', config.system.standbyImageUrl);
+                 e.currentTarget.style.display = 'none';
+               }}
+              />
+            ) : config.system.placeholderUrl && !logoError ? (
+              <img 
+               src={resolveAssetUrl(config.system.placeholderUrl)} 
+               alt="Placeholder Logo" 
+               onError={() => setLogoError(true)}
+               className="w-1/3 md:w-1/4 max-h-[50%] object-contain opacity-60 hover:opacity-100 transition-opacity duration-1000 scale-100" 
+              />
+            ) : (
+              <div className="text-white/10 text-[10px] md:text-[14px] font-black uppercase tracking-[1em] animate-pulse">CMAI STANDBY ENGINE</div>
+            )}
+            {state.isProcessing && (
+              <>
                 <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-black/20" />
                 <div className="absolute top-0 left-0 w-full h-[3px] bg-blue-500 shadow-[0_0_40px_rgba(0,122,255,1)] animate-scan z-20" />
                 <div className="absolute bottom-10 left-10 md:bottom-14 md:left-14 text-left">
-                    <div className="text-blue-400 text-[9px] font-black uppercase tracking-[0.4em] mb-1">Target Engine Locked</div>
-                    <div className="text-white text-xl md:text-3xl font-bold tracking-tight drop-shadow-lg">{selectedPortrait?.name}</div>
+                  <div className="text-blue-400 text-[9px] font-black uppercase tracking-[0.4em] mb-1">Target Engine Locked</div>
+                  <div className="text-white text-xl md:text-3xl font-bold tracking-tight drop-shadow-lg">{selectedPortrait?.name}</div>
                 </div>
-             </div>
-          ) : (
-            <div className="w-full h-full relative overflow-hidden flex items-center justify-center bg-transparent">
-               {showCameraLayer ? (
-                 state.isAutoMatting ? (
-                   <canvas className="absolute inset-0 w-full h-full object-cover" ref={remoteCanvasRef} />
-                 ) : (
-                   <video 
-                     ref={videoRef}
-                     autoPlay
-                     playsInline
-                     muted
-                     className="absolute inset-0 w-full h-full object-cover" />
-                 )
-               ) : config.system.standbyImageUrl ? (
-                 <img 
-                  key={config.system.standbyImageUrl}
-                  src={resolveAssetUrl(config.system.standbyImageUrl)} 
-                  alt="Standby Screen" 
-                  className="w-full h-full object-cover opacity-80"
-                  onError={(e) => {
-                    console.error('Standby image load failed:', config.system.standbyImageUrl);
-                    e.currentTarget.style.display = 'none';
-                  }}
-                 />
-               ) : config.system.placeholderUrl && !logoError ? (
-                 <img 
-                  src={resolveAssetUrl(config.system.placeholderUrl)} 
-                  alt="Placeholder Logo" 
-                  onError={() => setLogoError(true)}
-                  className="w-1/3 md:w-1/4 max-h-[50%] object-contain opacity-60 hover:opacity-100 transition-opacity duration-1000 scale-100" 
-                 />
-               ) : (
-                 <div className="text-white/10 text-[10px] md:text-[14px] font-black uppercase tracking-[1em] animate-pulse">CMAI STANDBY ENGINE</div>
-               )}
-            </div>
-          )}
+              </>
+            )}
+          </div>
         </div>
 
         {/* 左上角 Live 状态 */}
@@ -414,12 +408,12 @@ export const MainDisplay: React.FC<MainDisplayProps> = ({
 
       <style>{`
         @keyframes scan { 
-          0% { transform: translateY(-100%); opacity: 0; } 
+          0% { transform: translateY(-8px); opacity: 0; } 
           10% { opacity: 1; }
           90% { opacity: 1; }
-          100% { transform: translateY(100vh); opacity: 0; } 
+          100% { transform: translateY(100%); opacity: 0; } 
         }
-        .animate-scan { animation: scan 6s cubic-bezier(0.4, 0, 0.2, 1) infinite; height: 100%; }
+        .animate-scan { animation: scan 6s cubic-bezier(0.4, 0, 0.2, 1) infinite; }
         .scrollbar-hide::-webkit-scrollbar { display: none; }
       `}</style>
     </main>

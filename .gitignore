@@ -15,3 +15,10 @@ blankend/logs/
 
 *.zip
 checkpoints/
+
+*.tar.Z
+*.tar.gz
+
+blankend/debug_output/
+blankend/assets/human_pic/1.jpg
+blankend/debug_swapper.py

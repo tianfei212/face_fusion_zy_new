@@ -44,10 +44,10 @@ os.environ["BLANKEND_HW_TRANSCODE"] = "1"
 def main():
     # 1. Configuration
     RELAY_IP = "localhost"
-RELAY_ZMQ_PORT = 8888
-RELAY_WS_PORT = 5555
-RELAY_ENDPOINT = f"tcp://{RELAY_IP}:{RELAY_ZMQ_PORT}"
-WS_ENDPOINT = f"ws://{RELAY_IP}:{RELAY_WS_PORT}/video_in"
+    RELAY_ZMQ_PORT = 8888
+    RELAY_WS_PORT = 5555
+    RELAY_ENDPOINT = f"tcp://{RELAY_IP}:{RELAY_ZMQ_PORT}"
+    WS_ENDPOINT = f"ws://{RELAY_IP}:{RELAY_WS_PORT}/video_in"
     
     # Use standard identity to ensure Relay routes to us? 
     # Or try TEST identity first. 

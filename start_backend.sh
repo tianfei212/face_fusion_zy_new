@@ -42,12 +42,15 @@ release_port() {
 release_port 8001
 release_port 8100
 
-echo "清理所有 uvicorn 进程..."
-pkill uvicorn || true
+echo "清理所有残留进程..."
+pkill -9 -f "ai_face_change" || true
+pkill -9 -f "uvicorn" || true
+pkill -9 -f "multiprocessing.spawn" || true
 
 cd "$ROOT_DIR"
 export PYTHONPATH="$ROOT_DIR:${PYTHONPATH:-}"
-export SIMPLE_FORWARD=1
+export SIMPLE_FORWARD="${SIMPLE_FORWARD:-0}"
+echo "SIMPLE_FORWARD=$SIMPLE_FORWARD"
 
 mkdir -p "$ROOT_DIR/blankend/logs"
 # Start API server (Relay disabled)
