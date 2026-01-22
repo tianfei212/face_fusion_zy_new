@@ -102,6 +102,8 @@ const App: React.FC = () => {
     !isViewerMode && state.isCameraOn,
     ensureVideoInPath(config?.stream_send_url || '/video_in'),
     ensureVideoInPath(config?.stream_recv_url || '/video_in'),
+    state.isAutoMatting,
+    config?.stream_send_fps,
     log,
     remoteCanvasRef
   );

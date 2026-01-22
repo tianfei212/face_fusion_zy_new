@@ -31,6 +31,7 @@ export interface SystemConfig {
   stream_url?: string;
   stream_send_url?: string;
   stream_recv_url?: string;
+  stream_send_fps?: number;
   directories_blank: {
     portraitWorkList: string;
     portraitDfmList: string;

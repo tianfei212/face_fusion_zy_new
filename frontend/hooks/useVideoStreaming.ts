@@ -29,6 +29,8 @@ export const useVideoStreaming = (
   isStreaming: boolean,
   sendBaseUrl: string,
   receiveBaseUrl: string,
+  showBackendStream: boolean,
+  sendFps: number | undefined,
   log: (level: LogLevel, message: string) => void,
   remoteCanvasRef?: RefObject<HTMLCanvasElement>
 ) => {
@@ -46,7 +48,7 @@ export const useVideoStreaming = (
   const bcRef = useRef<BroadcastChannel | null>(null);
   const workerRef = useRef<Worker | null>(null);
   const workerUrlRef = useRef<string | null>(null);
-  const lastBroadcastTimeRef = useRef(0); // Throttle control
+  const lastBroadcastByTypeRef = useRef<{ frame: number; raw_frame: number }>({ frame: 0, raw_frame: 0 });
 
   useEffect(() => {
     const stopAll = () => {
@@ -95,6 +97,10 @@ export const useVideoStreaming = (
       return;
     }
 
+    const fps0 = Number.isFinite(sendFps as number) ? Number(sendFps) : 25;
+    const fps = Math.max(15, Math.min(30, Math.round(fps0)));
+    const targetInterval = Math.max(1, Math.round(1000 / fps));
+
     const wsUrl = toWsUrl(receiveBaseUrl || sendBaseUrl);
     const ws = new WebSocket(wsUrl);
     ws.binaryType = 'arraybuffer';
@@ -117,17 +123,18 @@ export const useVideoStreaming = (
     }
 
     // --- Optimized Broadcast Function ---
-    const broadcastMessage = (type: string, buf: ArrayBuffer) => {
+    const broadcastMessage = (type: 'frame' | 'raw_frame', buf: ArrayBuffer) => {
       const bc = bcRef.current;
       if (!bc) return;
       
-      // Throttle: Max 30 FPS broadcast to avoid choking main thread
       const now = Date.now();
-      if (now - lastBroadcastTimeRef.current < 33) return; 
+      const last = lastBroadcastByTypeRef.current[type] || 0;
+      const minInterval = type === 'raw_frame' ? (showBackendStream ? 100 : targetInterval) : 0;
+      if (minInterval > 0 && now - last < minInterval) return; 
 
       try {
         bc.postMessage({ type, payload: buf });
-        lastBroadcastTimeRef.current = now;
+        lastBroadcastByTypeRef.current[type] = now;
       } catch {}
     };
 
@@ -199,10 +206,8 @@ export const useVideoStreaming = (
       v.play().catch(() => {});
       if (!offscreenCanvasRef.current) offscreenCanvasRef.current = document.createElement('canvas');
       const oc = offscreenCanvasRef.current;
-      const targetInterval = 33;
-
       const canUseEncoder = typeof (window as any).ImageEncoder !== 'undefined' && typeof (window as any).VideoFrame !== 'undefined';
-      
+
       const sendFrame = async () => {
         const w = v.videoWidth; const h = v.videoHeight;
         if (w === 0 || h === 0) return;
@@ -295,7 +300,7 @@ export const useVideoStreaming = (
     };
 
     return stopAll;
-  }, [cameraStream, isStreaming, sendBaseUrl, receiveBaseUrl, log, remoteCanvasRef]);
+  }, [cameraStream, isStreaming, sendBaseUrl, receiveBaseUrl, showBackendStream, sendFps, log, remoteCanvasRef]);
 
   return { streamingStatus: status };
 };

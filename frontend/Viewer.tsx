@@ -4,6 +4,10 @@ import { X } from 'lucide-react';
 export const Viewer: React.FC = () => {
   const remoteCanvasRef = useRef<HTMLCanvasElement>(null);
   const showBackendStreamRef = useRef(true);
+  const lastFrameAtRef = useRef(0);
+  const lastRawAtRef = useRef(0);
+  const inFlightRef = useRef(false);
+  const pendingRef = useRef<{ type: 'frame' | 'raw_frame'; payload: any } | null>(null);
   
   // UI 状态（仅用于低频更新显示，对应您截图中的信息）
   const [status, setStatus] = useState('WAITING FOR SIGNAL...');
@@ -49,40 +53,78 @@ export const Viewer: React.FC = () => {
     setStatus('LISTENING');
 
     // 2. 监听消息
-    bc.onmessage = async (event) => {
-      // 基础校验：必须匹配 { type: 'frame', payload: ... } 格式
-      const expectedType = showBackendStreamRef.current ? 'frame' : 'raw_frame';
-      if (!event?.data || event.data.type !== expectedType) return;
-      
-      const payload = event.data.payload;
-      
-      // 解析 Blob
-      let blob: Blob | null = null;
-      if (payload instanceof Blob) {
-        blob = payload;
-      } else if (payload instanceof ArrayBuffer) {
-        blob = new Blob([payload], { type: 'image/jpeg' });
-      }
-      if (!blob) return;
-
-      // 3. 绘图 (这是最高优先级任务，直接操作 DOM)
+    const renderLoop = async () => {
+      if (inFlightRef.current) return;
+      inFlightRef.current = true;
       try {
-        const bitmap = await createImageBitmap(blob);
-        const canvas = remoteCanvasRef.current;
-        if (canvas) {
-          // 只有尺寸变化时才赋值，减少闪烁
-          if (canvas.width !== bitmap.width) canvas.width = bitmap.width;
-          if (canvas.height !== bitmap.height) canvas.height = bitmap.height;
-          
-          const ctx = canvas.getContext('2d', { alpha: false }); // alpha: false 稍微提升性能
-          ctx?.drawImage(bitmap, 0, 0);
-          bitmap.close(); // 必须释放内存
-        }
-      } catch (e) {
-        console.error('Frame render error', e);
-      }
+        while (pendingRef.current) {
+          const item = pendingRef.current;
+          pendingRef.current = null;
 
-      // 4. 计数 (静默更新，不触发渲染)
+          const now = Date.now();
+          if (item.type === 'frame') lastFrameAtRef.current = now;
+          else lastRawAtRef.current = now;
+
+          const preferFrame = now - lastFrameAtRef.current < 500;
+          if (item.type === 'raw_frame' && preferFrame) {
+            continue;
+          }
+
+          const payload = item.payload;
+          const canvas = remoteCanvasRef.current;
+          if (!canvas) continue;
+
+          try {
+            const Decoder = (window as any).ImageDecoder;
+            if (Decoder) {
+              const data =
+                payload instanceof ArrayBuffer
+                  ? payload
+                  : payload instanceof Blob
+                    ? await payload.arrayBuffer()
+                    : null;
+              if (!data) continue;
+              const decoder = new Decoder({ data, type: 'image/jpeg' });
+              const { image } = await decoder.decode();
+              const w = (image as any).displayWidth ?? image.width;
+              const h = (image as any).displayHeight ?? image.height;
+              if (canvas.width !== w) canvas.width = w;
+              if (canvas.height !== h) canvas.height = h;
+              const ctx = canvas.getContext('2d', { alpha: false });
+              if (ctx) ctx.drawImage(image, 0, 0);
+              image.close();
+              decoder.close();
+            } else {
+              const blob =
+                payload instanceof Blob
+                  ? payload
+                  : payload instanceof ArrayBuffer
+                    ? new Blob([payload], { type: 'image/jpeg' })
+                    : null;
+              if (!blob) continue;
+              const bitmap = await createImageBitmap(blob);
+              if (canvas.width !== bitmap.width) canvas.width = bitmap.width;
+              if (canvas.height !== bitmap.height) canvas.height = bitmap.height;
+              const ctx = canvas.getContext('2d', { alpha: false });
+              if (ctx) ctx.drawImage(bitmap, 0, 0);
+              bitmap.close();
+            }
+          } catch {}
+        }
+      } finally {
+        inFlightRef.current = false;
+      }
+    };
+
+    bc.onmessage = (event) => {
+      const t = event?.data?.type;
+      if (t !== 'frame' && t !== 'raw_frame') return;
+      showBackendStreamRef.current = t === 'frame';
+
+      const payload = event.data.payload;
+      pendingRef.current = { type: t, payload };
+      void renderLoop();
+
       statsRef.current.total += 1;
       statsRef.current.frameCount += 1;
       const now = Date.now();
@@ -98,7 +140,7 @@ export const Viewer: React.FC = () => {
           ...prev,
           totalFrames: statsRef.current.total,
           lastFrameTime: now,
-          lastPayload: payload?.constructor?.name || 'Blob'
+            lastPayload: payload?.constructor?.name || 'Blob'
         }));
 
         // 重置计数器
