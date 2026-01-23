@@ -24,19 +24,39 @@ logger = logging.getLogger("blankend.ai_core.engine")
 class EngineConfig:
     similarity_threshold: float = 0.20
     depth_enabled: bool = True
-    light_fusion_enabled: bool = False
+    light_fusion_enabled: bool = True
     matting_enabled: bool = False
     swap_stride: int = 1
     rvm_downsample_ratio: float = 0.25
     jpeg_quality: int = 85
     depth_threshold: float = 0.5
     depth_fusion_size: int = 518
+    # New Face Swapper Configs
+    swapper_weight: float = 0.3
+    swapper_soft_mask: bool = True
+
+    @staticmethod
+    def from_file(path: str = "blankend/config.json") -> EngineConfig:
+        import json
+        cfg = EngineConfig()
+        if os.path.exists(path):
+            try:
+                with open(path, 'r') as f:
+                    data = json.load(f)
+                    # Load swapper config
+                    if "ai" in data and "swapper" in data["ai"]:
+                        sw = data["ai"]["swapper"]
+                        cfg.swapper_weight = float(sw.get("weight", 0.3))
+                        cfg.swapper_soft_mask = bool(sw.get("soft_mask", True))
+            except Exception as e:
+                logger.error(f"Failed to load config from {path}: {e}")
+        return cfg
 
 
 class UnifiedInferenceEngine:
     def __init__(self, device_id: int, lazy_init: bool = False):
         self.device_id = device_id
-        self.cfg = EngineConfig()
+        self.cfg = EngineConfig.from_file()
 
         # Assets & State
         self._assets = default_asset_paths()
@@ -258,26 +278,16 @@ class UnifiedInferenceEngine:
         if best_face:
             try:
                 t0 = time.perf_counter()
-                swapped_bgr = self._inference.swap_face(self._source_face, best_face, bgr)
+                swapped_bgr = self._inference.swap_face(
+                    self._source_face, 
+                    best_face, 
+                    bgr, 
+                    enable_color_correction=self.cfg.light_fusion_enabled,
+                    swapper_weight=self.cfg.swapper_weight,
+                    soft_mask_enabled=self.cfg.swapper_soft_mask
+                )
                 t_cost = (time.perf_counter() - t0) * 1000
                 
-                # Apply Light Fusion (Optional but recommended)
-                if self.cfg.light_fusion_enabled:
-                    # Get crops
-                    bbox = best_face.bbox.astype(int)
-                    x1, y1, x2, y2 = bbox
-                    h, w = bgr.shape[:2]
-                    x1, y1 = max(0, x1), max(0, y1)
-                    x2, y2 = min(w, x2), min(h, y2)
-                    
-                    if x2 > x1 and y2 > y1:
-                        target_crop = bgr[y1:y2, x1:x2]
-                        # We need the swapped crop at the same location.
-                        # Since swap_face returns full image, we crop it.
-                        swapped_crop = swapped_bgr[y1:y2, x1:x2]
-                        corrected_crop = self._light_fusion(swapped_crop, target_crop)
-                        swapped_bgr[y1:y2, x1:x2] = corrected_crop
-
                 diag["swap_applied"] = True
                 diag["swap_sim"] = max_sim
                 if seq % 10 == 0:

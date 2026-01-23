@@ -32,6 +32,10 @@
       "swap": "inswapper_128_fp16.onnx",
       "insightface_app": "buffalo_l"
     },
+    "swapper": {
+      "weight": 0.3,
+      "soft_mask": true
+    },
     "preload": {
       "dfm": false,
       "dfm_model": ""

@@ -185,7 +185,101 @@ class CoreInference:
         face.normed_embedding = normed
         return normed
 
-    def swap_face(self, source_face: Face, target_face: Face, frame: np.ndarray) -> np.ndarray:
+    def _lab_color_transfer(self, source: np.ndarray, target: np.ndarray) -> np.ndarray:
+        try:
+            s_lab = cv2.cvtColor(source, cv2.COLOR_BGR2LAB).astype(np.float32)
+            t_lab = cv2.cvtColor(target, cv2.COLOR_BGR2LAB).astype(np.float32)
+
+            # Compute stats only on the center region to avoid background noise (black borders)
+            h, w = s_lab.shape[:2]
+            ch, cw = int(h * 0.5), int(w * 0.5)
+            y1, x1 = int(h * 0.25), int(w * 0.25)
+            s_center = s_lab[y1:y1+ch, x1:x1+cw, :]
+            t_center = t_lab[y1:y1+ch, x1:x1+cw, :] # Assuming target is also aligned/cropped
+
+            s_mean, s_std = cv2.meanStdDev(s_center)
+            t_mean, t_std = cv2.meanStdDev(t_center)
+
+            s_mean = s_mean.reshape((1, 1, 3))
+            s_std = s_std.reshape((1, 1, 3))
+            t_mean = t_mean.reshape((1, 1, 3))
+            t_std = t_std.reshape((1, 1, 3))
+            
+            s_std = np.maximum(s_std, 1e-6)
+
+            # L Channel: Mean + Std (Match brightness and contrast)
+            res_l = (s_lab[..., 0] - s_mean[..., 0]) / s_std[..., 0] * t_std[..., 0] + t_mean[..., 0]
+            
+            # A/B Channels: Mean Only (Match average tone, avoid amplifying color noise)
+            # Using full Reinhard on A/B often leads to purple/green artifacts if source std is low
+            res_a = (s_lab[..., 1] - s_mean[..., 1]) + t_mean[..., 1]
+            res_b = (s_lab[..., 2] - s_mean[..., 2]) + t_mean[..., 2]
+            
+            res_lab = np.stack([res_l, res_a, res_b], axis=-1)
+            res_lab = np.clip(res_lab, 0, 255).astype(np.uint8)
+            
+            return cv2.cvtColor(res_lab, cv2.COLOR_LAB2BGR)
+        except Exception:
+            return source
+
+    def _get_landmark_mask(self, size: int, face_kps: np.ndarray) -> np.ndarray:
+        # Create a convex hull mask from landmarks (FaceFusion style)
+        mask = np.zeros((size, size), dtype=np.float32)
+        try:
+            # Scale landmarks to crop size
+            # Note: kps are in original image coordinates. We need them in crop coordinates.
+            # But we don't have the affine matrix here easily to transform them.
+            # FaceFusion typically uses a static mask template or transforms landmarks.
+            
+            # Alternative: Since we are in the crop, the face is "Canonical".
+            # We can use a static "Face Hull" for standard ArcFace crop.
+            # Points roughly corresponding to chin and forehead in 112x112, scaled to size.
+            
+            # Better fallback: Standard Soft Ellipse is actually what FaceFusion uses 
+            # if 'box' mask is selected, but 'occlusion' mask is preferred.
+            # Without a segmentation model (Occluder), Convex Hull of aligned landmarks is hard 
+            # because we don't have the aligned landmarks ready.
+            
+            # Let's stick to the Ellipse but make it "Softer" and better tuned for 256.
+            # Or assume standard positions for ArcFace crop.
+            pass
+        except Exception:
+            pass
+        return mask
+
+    def _balance_embedding(self, source_emb: np.ndarray, target_emb: np.ndarray, weight: float = 0.5) -> np.ndarray:
+        s = source_emb.flatten()
+        t = target_emb.flatten()
+        
+        # Normalize just in case
+        s = s / np.linalg.norm(s)
+        t = t / np.linalg.norm(t)
+        
+        # Simple linear interpolation
+        # Weight 0.0 -> 100% Source
+        # Weight 1.0 -> 100% Target
+        res = s * (1.0 - weight) + t * weight
+        res = res / np.linalg.norm(res)
+        return res
+
+    def _create_soft_mask(self, crop_size: int) -> np.ndarray:
+        mask = np.zeros((crop_size, crop_size), dtype=np.float32)
+        c = crop_size // 2
+        
+        # Ellipse parameters
+        ax = int(round(crop_size * 0.40))
+        ay = int(round(crop_size * 0.50))
+        
+        cv2.ellipse(mask, (c, c), (ax, ay), 0, 0, 360, 1.0, -1)
+        
+        # Blur to feather edges
+        k_size = max(5, crop_size // 10)
+        if k_size % 2 == 0: k_size += 1
+        mask = cv2.GaussianBlur(mask, (k_size, k_size), 0)
+        
+        return mask
+
+    def swap_face(self, source_face: Face, target_face: Face, frame: np.ndarray, enable_color_correction: bool = False, feather_amount: Optional[float] = None, swapper_weight: float = 0.0, soft_mask_enabled: bool = True) -> np.ndarray:
         # Step 3: Strict Implementation Logic (Clone FaceFusion)
         
         # Embedding Prep
@@ -199,6 +293,15 @@ class CoreInference:
             embedding = source_face.normed_embedding if source_face.normed_embedding is not None else source_face.embedding
         if embedding is None:
             raise ValueError("Source face has no embedding")
+        
+        # Dynamic Embedding Balancing
+        if swapper_weight > 0.0 and target_face.normed_embedding is not None:
+             # Assuming source_face.normed_embedding is available and best for mixing
+             s_emb = source_face.normed_embedding if source_face.normed_embedding is not None else embedding.flatten()
+             t_emb = target_face.normed_embedding
+             mixed = self._balance_embedding(s_emb, t_emb, swapper_weight)
+             embedding = mixed
+             
         embedding = np.asarray(embedding, dtype=np.float32).reshape((1, 512))
         
         crop_size = int(getattr(self, "_swap_target_size", 128) or 128)
@@ -223,10 +326,14 @@ class CoreInference:
         # Transpose to (1, 3, crop_size, crop_size) (NCHW).
         
         if getattr(self, "_swap_has_mask", False) or crop_size >= 256:
-            test_crop = crop.astype(np.float32) / 127.5 - 1.0
+            # Hyperswap (256) seems to expect [0, 1] input based on debug results
+            test_crop = crop.astype(np.float32) / 255.0
         else:
             test_crop = crop.astype(np.float32) / 255.0
-        test_crop = test_crop[:, :, ::-1]
+        
+        # NOTE: Reverted to RGB conversion [:, :, ::-1] as 'debug_res_cc.jpg' (RGB) was correct
+        test_crop = test_crop[:, :, ::-1] 
+        
         test_crop = np.transpose(test_crop, (2, 0, 1))
         test_crop = np.expand_dims(test_crop, axis=0)
         
@@ -252,8 +359,13 @@ class CoreInference:
         out0 = output[0]
         if float(out0.min()) < 0.0:
             out0 = (out0 + 1.0) * 0.5
+            
+        # NOTE: Reverted to RGB->BGR conversion [:, :, ::-1] assuming model output is RGB
         res_crop = out0.transpose((1, 2, 0))[:, :, ::-1]
         res_crop = np.clip(res_crop * 255.0, 0, 255).astype(np.uint8)
+
+        if enable_color_correction:
+            res_crop = self._lab_color_transfer(res_crop, crop)
         
         IM = cv2.invertAffineTransform(M)
         
@@ -261,25 +373,40 @@ class CoreInference:
             alpha = np.clip(out_mask[0, 0], 0.0, 1.0).astype(np.float32)
             alpha = cv2.GaussianBlur(alpha, (0, 0), 2.0)
 
-            c = crop_size // 2
-            face_soft = np.zeros((crop_size, crop_size), dtype=np.float32)
-            ax = int(round(crop_size * 0.44))
-            ay = int(round(crop_size * 0.54))
-            cv2.ellipse(face_soft, (c, c), (ax, ay), 0, 0, 360, 1.0, -1)
-            face_soft = cv2.GaussianBlur(face_soft, (0, 0), 6.0)
-            alpha = np.power(alpha, 0.70).astype(np.float32)
-            alpha = np.clip(alpha * face_soft, 0.0, 1.0)
-            bin_mask = (alpha > 0.35).astype(np.uint8) * 255
+            # Refined Mask Logic (FaceFusion-like Soft Masking)
+            # 1. Blur the model mask
+            # 2. Multiply by a soft edge mask to avoid hard square boundaries
+            
+            if soft_mask_enabled:
+                face_soft = self._create_soft_mask(crop_size)
+                # Combine
+                alpha = np.power(alpha, 0.70).astype(np.float32) # Gamma correction to boost mask
+                alpha = np.clip(alpha * face_soft, 0.0, 1.0)
+            
+            bin_mask = (alpha > 0.35).astype(np.uint8) * 255 # Only used for seamlessClone (disabled)
         else:
-            bin_mask = np.zeros((crop_size, crop_size), dtype=np.uint8)
-            c = crop_size // 2
-            ax = int(round(crop_size * 0.34))
-            ay = int(round(crop_size * 0.40))
-            cv2.ellipse(bin_mask, (c, c), (ax, ay), 0, 0, 360, 255, -1)
-            feather = float(max(10.0, crop_size * 0.055))
-            dist = cv2.distanceTransform(bin_mask, cv2.DIST_L2, 5).astype(np.float32)
-            alpha = np.clip(dist / feather, 0.0, 1.0)
-            alpha = cv2.GaussianBlur(alpha, (0, 0), 2.0)
+            # Fallback Mask (If model doesn't output mask)
+            if soft_mask_enabled:
+                 alpha = self._create_soft_mask(crop_size)
+                 bin_mask = (alpha > 0.0).astype(np.uint8) * 255
+            else:
+                bin_mask = np.zeros((crop_size, crop_size), dtype=np.uint8)
+                c = crop_size // 2
+                
+                # Use a slightly wider ellipse for 256
+                ax = int(round(crop_size * 0.40))
+                ay = int(round(crop_size * 0.50))
+                
+                cv2.ellipse(bin_mask, (c, c), (ax, ay), 0, 0, 360, 255, -1)
+                
+                if feather_amount is not None:
+                    feather = float(feather_amount)
+                else:
+                    feather = float(max(10.0, crop_size * 0.1)) # Increase feathering for 256
+                
+                dist = cv2.distanceTransform(bin_mask, cv2.DIST_L2, 5).astype(np.float32)
+                alpha = np.clip(dist / feather, 0.0, 1.0)
+                alpha = cv2.GaussianBlur(alpha, (0, 0), 2.0)
         alpha3 = np.dstack([alpha, alpha, alpha])
         img_mask = cv2.warpAffine(alpha3, IM, (frame.shape[1], frame.shape[0]), borderValue=0.0)
         img_mask = np.clip(img_mask, 0.0, 1.0).astype(np.float32)
@@ -316,23 +443,5 @@ class CoreInference:
                     blended[region > 0] = sharp[region > 0]
             except Exception:
                 pass
-            return blended
-
-        try:
-            k = max(3, int(crop_size // 40))
-            m0 = cv2.erode(bin_mask, np.ones((k, k), np.uint8), iterations=1)
-            m = cv2.warpAffine(m0, IM, (frame.shape[1], frame.shape[0]), borderValue=0)
-            _, m = cv2.threshold(m, 127, 255, cv2.THRESH_BINARY)
-            if int(m.max()) > 0:
-                ys, xs = np.where(m > 0)
-                if xs.size > 0 and ys.size > 0:
-                    cx = int(np.clip(xs.mean(), 0, frame.shape[1] - 1))
-                    cy = int(np.clip(ys.mean(), 0, frame.shape[0] - 1))
-                    src = np.clip(img_white, 0, 255).astype(np.uint8)
-                    dst = frame
-                    out = cv2.seamlessClone(src, dst, m, (cx, cy), cv2.NORMAL_CLONE)
-                    return out
-        except Exception:
-            pass
 
         return blended

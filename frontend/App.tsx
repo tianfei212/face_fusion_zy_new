@@ -380,7 +380,37 @@ const App: React.FC = () => {
       if (isViewerMode) return;
       try {
         const configRes = await fetch(`./systemConfig.json?t=${Date.now()}`);
-        const data: SystemConfig = await configRes.json();
+        const data0: SystemConfig = await configRes.json();
+        const host = window.location.hostname;
+        const normalizeBase = (raw?: string) => {
+          if (!raw) return raw;
+          try {
+            const u = new URL(raw);
+            if ((u.hostname === 'localhost' || u.hostname === '127.0.0.1') && host && host !== 'localhost' && host !== '127.0.0.1') {
+              u.hostname = host;
+              return u.toString();
+            }
+          } catch {}
+          return raw;
+        };
+        const normalizeWs = (raw?: string) => {
+          if (!raw) return raw;
+          try {
+            const u = new URL(raw);
+            if ((u.hostname === 'localhost' || u.hostname === '127.0.0.1') && host && host !== 'localhost' && host !== '127.0.0.1') {
+              u.hostname = host;
+              return u.toString();
+            }
+          } catch {}
+          return raw;
+        };
+        const data: SystemConfig = {
+          ...data0,
+          blank_url: normalizeBase(data0.blank_url) || data0.blank_url,
+          stream_send_url: normalizeWs(data0.stream_send_url),
+          stream_recv_url: normalizeWs(data0.stream_recv_url),
+          stream_url: normalizeWs(data0.stream_url),
+        };
         setConfig(data);
         log('info', '系统配置加载完成');
         await refreshPortraits(data);
@@ -405,63 +435,101 @@ const App: React.FC = () => {
     });
   };
 
-  const buildApiUrl = useCallback((path: string) => {
-    const base = (config?.blank_url || '').replace(/\/$/, '');
+  const getApiBases = useCallback(() => {
+    const bases: string[] = [];
+    const pushBase = (raw?: string) => {
+      if (!raw) return;
+      const base = raw.replace(/\/$/, '');
+      if (base && !bases.includes(base)) bases.push(base);
+    };
+    pushBase(config?.blank_url);
+    const ws = config?.stream_send_url || config?.stream_recv_url || config?.stream_url;
+    if (ws) {
+      try {
+        const u = new URL(ws);
+        const proto = u.protocol === 'wss:' ? 'https:' : 'http:';
+        pushBase(`${proto}//${u.host}`);
+      } catch {}
+    }
+    return bases;
+  }, [config?.blank_url, config?.stream_send_url, config?.stream_recv_url, config?.stream_url]);
+
+  const buildApiUrl = useCallback((base: string, path: string) => {
+    const cleanBase = (base || '').replace(/\/$/, '');
     const cleanPath = path.startsWith('/') ? path : `/${path}`;
-    return `${base}${cleanPath}`;
-  }, [config?.blank_url]);
+    return `${cleanBase}${cleanPath}`;
+  }, []);
 
   const sendAiProcess = useCallback(async (payload: any) => {
-    if (!config?.blank_url) return null;
-    try {
-      const res = await fetch(buildApiUrl('/api/v1/ai/process'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      return await res.json();
-    } catch (e: any) {
-      log('error', `AI process 请求失败: ${e?.message || e}`);
-      return null;
+    const bases = getApiBases();
+    if (bases.length === 0) return null;
+    let lastErr: any = null;
+    let firstOk: any = null;
+    for (const base of bases) {
+      try {
+        const res = await fetch(buildApiUrl(base, '/api/v1/ai/process'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        if (firstOk === null) firstOk = data;
+      } catch (e: any) {
+        lastErr = e;
+      }
     }
-  }, [buildApiUrl, config?.blank_url, log]);
+    if (firstOk !== null) return firstOk;
+    log('error', `AI process 请求失败: ${lastErr?.message || lastErr}`);
+    return null;
+  }, [buildApiUrl, getApiBases, log]);
 
   const sendAiCommand = useCallback(async (payload: any) => {
-    if (!config?.blank_url) return null;
-    try {
-      const res = await fetch(buildApiUrl('/api/v1/ai/command'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      return await res.json();
-    } catch (e: any) {
-      log('error', `AI command 请求失败: ${e?.message || e}`);
-      return null;
+    const bases = getApiBases();
+    if (bases.length === 0) return null;
+    let lastErr: any = null;
+    let firstOk: any = null;
+    for (const base of bases) {
+      try {
+        const res = await fetch(buildApiUrl(base, '/api/v1/ai/command'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        if (firstOk === null) firstOk = data;
+      } catch (e: any) {
+        lastErr = e;
+      }
     }
-  }, [buildApiUrl, config?.blank_url, log]);
+    if (firstOk !== null) return firstOk;
+    log('error', `AI command 请求失败: ${lastErr?.message || lastErr}`);
+    return null;
+  }, [buildApiUrl, getApiBases, log]);
 
   const waitForDfmReady = useCallback(async (expectedName: string, standbyWorkerId: number, timeoutMs: number = 60000) => {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
       try {
-        const res = await fetch(buildApiUrl('/api/v1/ai/status'));
-        if (res.ok) {
-          const data = await res.json();
-          const workers = data?.status?.workers;
-          const st = workers?.[standbyWorkerId];
-          const loaded = st?.loaded_dfm;
-          if (loaded && String(loaded) === String(expectedName)) {
-            return true;
+        const bases = getApiBases();
+        for (const base of bases) {
+          const res = await fetch(buildApiUrl(base, '/api/v1/ai/status'));
+          if (res.ok) {
+            const data = await res.json();
+            const workers = data?.status?.workers;
+            const st = workers?.[standbyWorkerId];
+            const loaded = st?.loaded_dfm;
+            if (loaded && String(loaded) === String(expectedName)) {
+              return true;
+            }
           }
         }
       } catch (e) {}
       await new Promise(r => setTimeout(r, 200));
     }
     return false;
-  }, [buildApiUrl]);
+  }, [buildApiUrl, getApiBases]);
 
   useEffect(() => {
     if (isViewerMode) return;
